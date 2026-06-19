@@ -45,6 +45,31 @@ jobs:
           Add-Content $env:GITHUB_ENV "VULKAN_SDK=C:\VulkanSDK\${env:VULKAN_VERSION}"
           Add-Content $env:GITHUB_PATH "C:\VulkanSDK\${env:VULKAN_VERSION}\bin"
 
+      - name: Configure Vulkan ARM64 library path
+        shell: powershell
+        env:
+          VULKAN_VERSION: 1.4.313.2
+        run: |
+          # Check if ARM64 Vulkan lib was installed by the SDK installer
+          $arm64Lib = "C:\VulkanSDK\${env:VULKAN_VERSION}\Lib\ARM64\vulkan-1.lib"
+          if (Test-Path $arm64Lib) {
+            Write-Host "Found ARM64 Vulkan lib at: $arm64Lib"
+            Add-Content $env:GITHUB_ENV "NODE_LLAMA_CPP_CMAKE_OPTION_Vulkan_LIBRARY=$arm64Lib"
+          } else {
+            # Fallback: list what's in the SDK Lib dir for diagnostics
+            Write-Host "ARM64 Vulkan lib NOT found. Listing SDK Lib dir:"
+            Get-ChildItem "C:\VulkanSDK\${env:VULKAN_VERSION}\Lib" -Recurse -Filter "vulkan-1.lib" | Select-Object FullName
+            # Try Windows SDK location as fallback
+            $winsdk = (Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\Lib" | Sort-Object Name -Descending | Select-Object -First 1).FullName
+            $winsdkLib = "$winsdk\um\arm64\vulkan-1.lib"
+            if (Test-Path $winsdkLib) {
+              Write-Host "Found ARM64 Vulkan lib in Windows SDK: $winsdkLib"
+              Add-Content $env:GITHUB_ENV "NODE_LLAMA_CPP_CMAKE_OPTION_Vulkan_LIBRARY=$winsdkLib"
+            } else {
+              Write-Host "No ARM64 Vulkan lib found anywhere - build will likely fail"
+            }
+          }
+
       - name: Build win-arm64-vulkan binaries
         shell: bash
         env:
