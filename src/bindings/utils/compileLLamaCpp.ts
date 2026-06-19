@@ -125,12 +125,19 @@ export async function compileLlamaCpp(buildOptions: BuildOptions, compileOptions
                         process.platform === "win32" &&
                         process.arch === "x64";
                     if (isWinCrossCompileArm64) {
-                        // Use host (x64) toolchain for shaders-gen; if not available, omit the option
-                        // so CMake falls back to the default host compiler.
-                        const hostToolchainFile = await getToolchainFileForArch("x64", useWindowsLlvm);
-                        if (hostToolchainFile != null)
-                            cmakeToolchainOptions.set("GGML_VULKAN_SHADERS_GEN_TOOLCHAIN", hostToolchainFile);
-                        // else: no toolchain set → CMake uses default host x64 compiler ✓
+                        // Do NOT set GGML_VULKAN_SHADERS_GEN_TOOLCHAIN when cross-compiling
+                        // arm64 on an x64 Windows host.
+                        //
+                        // Using the LLVM x64 toolchain file (llvm.win32.host-x64.target-x64.cmake)
+                        // causes cmake's try_compile (CMakeDetermineCompilerABI) to fail with
+                        // "Failed to set working directory: No such file or directory" due to
+                        // an incompatibility between cmake's cross-compile detection and the
+                        // LLVM toolchain file that sets CMAKE_SYSTEM_NAME=Windows.
+                        //
+                        // Without this option, cmake uses the default host compiler (MSVC cl.exe),
+                        // which correctly builds vulkan-shaders-gen as an x64 binary that can run
+                        // on the x64 CI runner, while the main build still uses LLVM for ARM64.
+                        // → deliberately omit to use default MSVC x64 host compiler ✓
                     } else {
                         cmakeToolchainOptions.set("GGML_VULKAN_SHADERS_GEN_TOOLCHAIN", toolchainFile);
                     }
