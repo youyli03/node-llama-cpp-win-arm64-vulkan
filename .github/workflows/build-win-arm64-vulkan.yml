@@ -1,0 +1,80 @@
+name: "Build Windows ARM64 + Vulkan"
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-win-arm64-vulkan:
+    name: Build win-arm64-vulkan
+    runs-on: windows-2022
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build TypeScript
+        run: npm run build
+
+      - name: Download latest llama.cpp release
+        env:
+          CI: true
+        run: node ./dist/cli/cli.js source download --release latest --skipBuild --noBundle --noUsageExample
+
+      - name: Install CMake & Ninja
+        run: |
+          choco install cmake.install --version=4.2.1
+          choco install cmake --version=4.2.1
+          choco install ninja
+
+      - name: Install Vulkan SDK
+        shell: powershell
+        env:
+          VULKAN_VERSION: 1.4.313.2
+        run: |
+          curl.exe -o $env:RUNNER_TEMP\VulkanSDK-Installer.exe -L "https://sdk.lunarg.com/sdk/download/${env:VULKAN_VERSION}/windows/vulkansdk-windows-X64-${env:VULKAN_VERSION}.exe"
+          & "$env:RUNNER_TEMP\VulkanSDK-Installer.exe" --accept-licenses --default-answer --confirm-command install
+          Add-Content $env:GITHUB_ENV "VULKAN_SDK=C:\VulkanSDK\${env:VULKAN_VERSION}"
+          Add-Content $env:GITHUB_PATH "C:\VulkanSDK\${env:VULKAN_VERSION}\bin"
+
+      - name: Setup MSVC ARM64 toolchain
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: amd64_arm64
+
+      - name: Build win-arm64-vulkan binaries
+        shell: bash
+        env:
+          CI: true
+        run: |
+          mkdir -p bins
+
+          node ./dist/cli/cli.js source build \
+            --ciMode \
+            --noUsageExample \
+            --arch arm64 \
+            --gpu vulkan \
+            --nodeTarget 20
+
+          # Move output to bins/
+          LOCAL_BUILDS="llama/localBuilds"
+          for folder in "$LOCAL_BUILDS"/*/; do
+            name=$(basename "$folder")
+            mv "$folder/Release" "bins/$name" || true
+          done
+
+          ls -la bins/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-llama-cpp-win-arm64-vulkan
+          path: bins/
