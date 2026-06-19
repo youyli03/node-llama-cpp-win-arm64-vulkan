@@ -120,6 +120,7 @@ jobs:
         shell: bash
         env:
           CI: true
+          NLC_LOCAL_BUILDS_DIR: "C:/b"
         run: |
           node ./dist/cli/cli.js source build \
             --ciMode \
@@ -132,7 +133,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p bins
-          LOCAL_BUILDS="llama/localBuilds"
+          LOCAL_BUILDS="C:/b"
           for folder in "$LOCAL_BUILDS"/*/; do
             name=$(basename "$folder")
             if [ -d "$folder/Release" ]; then
