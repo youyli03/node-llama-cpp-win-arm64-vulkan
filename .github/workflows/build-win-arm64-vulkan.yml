@@ -29,11 +29,20 @@ jobs:
           CI: true
         run: node ./dist/cli/cli.js source download --release latest --skipBuild --noBundle --noUsageExample
 
-      - name: Install CMake & Ninja
+      - name: Install CMake
+        run: choco install cmake.install --version=4.2.1 -y
+
+      - name: Install Ninja (official binary)
+        shell: powershell
         run: |
-          choco install cmake.install --version=4.2.1
-          choco install cmake --version=4.2.1
-          choco install ninja
+          $ninjaVer = "1.12.1"
+          $ninjaDir = "C:\ninja"
+          New-Item -ItemType Directory -Force -Path $ninjaDir | Out-Null
+          curl.exe -L "https://github.com/ninja-build/ninja/releases/download/v${ninjaVer}/ninja-win.zip" -o "$env:RUNNER_TEMP\ninja.zip"
+          Expand-Archive "$env:RUNNER_TEMP\ninja.zip" -DestinationPath $ninjaDir -Force
+          Add-Content $env:GITHUB_PATH $ninjaDir
+          Write-Host "Ninja installed at $ninjaDir\ninja.exe"
+          & "$ninjaDir\ninja.exe" --version
 
       - name: Install Vulkan SDK
         shell: powershell
@@ -57,51 +66,29 @@ jobs:
           $llvmBin    = "C:\Program Files\LLVM\bin"
           $defFile    = "$env:RUNNER_TEMP\vulkan-1.def"
 
-          # Check if ARM64 lib already exists (future SDK versions may include it)
           if (Test-Path $arm64Lib) {
-            Write-Host "ARM64 vulkan-1.lib already exists at $arm64Lib"
+            Write-Host "ARM64 vulkan-1.lib already exists"
             Add-Content $env:GITHUB_ENV "NODE_LLAMA_CPP_CMAKE_OPTION_Vulkan_LIBRARY=$arm64Lib"
             exit 0
           }
 
-          Write-Host "Generating ARM64 vulkan-1.lib from x64 lib using llvm-dlltool..."
-
-          # Step 1: Extract symbol names from x64 vulkan-1.lib using llvm-nm
-          $nmExe = "$llvmBin\llvm-nm.exe"
-          if (-not (Test-Path $nmExe)) { $nmExe = "llvm-nm.exe" }
-          Write-Host "Using llvm-nm: $nmExe"
-
-          $symbols = & $nmExe --defined-only --extern-only --print-file-name "$x64Lib" 2>&1 |
+          Write-Host "Generating ARM64 vulkan-1.lib..."
+          $symbols = & "$llvmBin\llvm-nm.exe" --defined-only --extern-only --print-file-name "$x64Lib" 2>&1 |
             Where-Object { $_ -match " T " -or $_ -match " D " } |
             ForEach-Object { ($_ -split "\s+")[-1] }
 
-          if ($symbols.Count -eq 0) {
-            Write-Error "Failed to extract symbols from $x64Lib"
-            exit 1
-          }
+          if ($symbols.Count -eq 0) { Write-Error "No symbols extracted"; exit 1 }
           Write-Host "Extracted $($symbols.Count) symbols"
 
-          # Step 2: Write .def file
           "LIBRARY vulkan-1" | Out-File -FilePath $defFile -Encoding ascii
-          "EXPORTS" | Out-File -FilePath $defFile -Append -Encoding ascii
+          "EXPORTS"          | Out-File -FilePath $defFile -Append -Encoding ascii
           $symbols | ForEach-Object { "    $_" } | Out-File -FilePath $defFile -Append -Encoding ascii
-          Write-Host "DEF file written to $defFile"
-
-          # Step 3: Generate ARM64 import lib using llvm-dlltool
-          $dlltoolExe = "$llvmBin\llvm-dlltool.exe"
-          if (-not (Test-Path $dlltoolExe)) { $dlltoolExe = "llvm-dlltool.exe" }
-          Write-Host "Using llvm-dlltool: $dlltoolExe"
 
           New-Item -ItemType Directory -Force -Path $arm64Dir | Out-Null
-          & $dlltoolExe -m arm64 -D "vulkan-1.dll" -d $defFile -l $arm64Lib
-          if (-not (Test-Path $arm64Lib)) {
-            Write-Error "Failed to generate ARM64 vulkan-1.lib"
-            exit 1
-          }
-          Write-Host "Successfully generated ARM64 vulkan-1.lib at $arm64Lib"
-          Get-Item $arm64Lib | Select-Object FullName, Length
+          & "$llvmBin\llvm-dlltool.exe" -m arm64 -D "vulkan-1.dll" -d $defFile -l $arm64Lib
+          if (-not (Test-Path $arm64Lib)) { Write-Error "Failed to generate lib"; exit 1 }
 
-          # Export to cmake
+          Write-Host "Generated: $arm64Lib ($((Get-Item $arm64Lib).Length) bytes)"
           Add-Content $env:GITHUB_ENV "NODE_LLAMA_CPP_CMAKE_OPTION_Vulkan_LIBRARY=$arm64Lib"
 
       - name: Build win-arm64-vulkan binaries
