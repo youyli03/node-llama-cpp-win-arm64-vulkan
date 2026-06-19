@@ -176,6 +176,17 @@ jobs:
           Add-Content $env:GITHUB_ENV "VULKAN_SDK=C:\VulkanSDK\${env:VULKAN_VERSION}"
           Add-Content $env:GITHUB_PATH "C:\VulkanSDK\${env:VULKAN_VERSION}\bin"
 
+      - name: Install Vulkan SDK on Windows (2)
+        if: matrix.config.name == 'Windows (2)'
+        shell: powershell
+        env:
+          VULKAN_VERSION: 1.4.313.2
+        run: |
+          curl.exe -o $env:RUNNER_TEMP/VulkanSDK-Installer.exe -L "https://sdk.lunarg.com/sdk/download/${env:VULKAN_VERSION}/windows/vulkansdk-windows-X64-${env:VULKAN_VERSION}.exe"
+          & "$env:RUNNER_TEMP\VulkanSDK-Installer.exe" --accept-licenses --default-answer --confirm-command install
+          Add-Content $env:GITHUB_ENV "VULKAN_SDK=C:\VulkanSDK\${env:VULKAN_VERSION}"
+          Add-Content $env:GITHUB_PATH "C:\VulkanSDK\${env:VULKAN_VERSION}\bin"
+
       - name: Install Vulkan SDK on Ubuntu
         if: matrix.config.name == 'Ubuntu (1)'
         env:
@@ -262,6 +273,7 @@ jobs:
             await buildBinary("x64", ["--gpu", "vulkan"]);
           } else if (process.env.ARTIFACT_NAME === "win-2") {
             await buildBinary("arm64", ["--gpu", "false"], windowsOnArmNodeVersion);
+            await buildBinary("arm64", ["--gpu", "vulkan"], windowsOnArmNodeVersion);
             await buildBinary("x64", ["--gpu", "cuda"]);
           } else if (process.env.ARTIFACT_NAME === "linux-1") {
             await buildBinary("x64", ["--gpu", "false"]);
