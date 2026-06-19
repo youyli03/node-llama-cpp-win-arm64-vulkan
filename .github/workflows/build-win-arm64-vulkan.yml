@@ -11,15 +11,22 @@ jobs:
     name: Build win-arm64-vulkan
     runs-on: windows-2022
 
+    defaults:
+      run:
+        working-directory: s
+
     steps:
       - name: Enable Windows Long Paths
         shell: powershell
+        working-directory: ${{ github.workspace }}
         run: |
           reg add "HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\FileSystem" /v LongPathsEnabled /t REG_DWORD /d 1 /f
           git config --system core.longpaths true
           Write-Host "Long path support enabled"
 
       - uses: actions/checkout@v4
+        with:
+          path: s
 
       - uses: actions/setup-node@v4
         with:
@@ -139,4 +146,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: node-llama-cpp-win-arm64-vulkan
-          path: bins/
+          path: s/bins/
