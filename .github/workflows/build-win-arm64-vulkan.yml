@@ -30,7 +30,18 @@ jobs:
         run: node ./dist/cli/cli.js source download --release latest --skipBuild --noBundle --noUsageExample
 
       - name: Install CMake
-        run: choco install cmake.install --version=4.2.1 -y
+        shell: powershell
+        run: |
+          # Use CMake 3.31.7 (cmake 4.2.x has a regression with cross-compile
+          # toolchain files: TryCompile fails with "no such file or directory"
+          # when CMAKE_SYSTEM_NAME is set in the toolchain file)
+          $cmakeVer = "3.31.7"
+          $cmakeDir = "C:\cmake-$cmakeVer"
+          curl.exe -L "https://github.com/Kitware/CMake/releases/download/v${cmakeVer}/cmake-${cmakeVer}-windows-x86_64.zip" -o "$env:RUNNER_TEMP\cmake.zip"
+          Expand-Archive "$env:RUNNER_TEMP\cmake.zip" -DestinationPath "C:\" -Force
+          Rename-Item "C:\cmake-${cmakeVer}-windows-x86_64" $cmakeDir -ErrorAction SilentlyContinue
+          Add-Content $env:GITHUB_PATH "$cmakeDir\bin"
+          & "$cmakeDir\bin\cmake.exe" --version
 
       - name: Install Ninja (official binary)
         shell: powershell
