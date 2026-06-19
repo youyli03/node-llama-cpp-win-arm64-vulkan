@@ -45,38 +45,70 @@ jobs:
           Add-Content $env:GITHUB_ENV "VULKAN_SDK=C:\VulkanSDK\${env:VULKAN_VERSION}"
           Add-Content $env:GITHUB_PATH "C:\VulkanSDK\${env:VULKAN_VERSION}\bin"
 
-      - name: Configure Vulkan ARM64 library path
+      - name: Generate ARM64 vulkan-1.lib using llvm-dlltool
         shell: powershell
         env:
           VULKAN_VERSION: 1.4.313.2
         run: |
-          # Check if ARM64 Vulkan lib was installed by the SDK installer
-          $arm64Lib = "C:\VulkanSDK\${env:VULKAN_VERSION}\Lib\ARM64\vulkan-1.lib"
+          $VulkanSDK  = "C:\VulkanSDK\${env:VULKAN_VERSION}"
+          $x64Lib     = "$VulkanSDK\Lib\vulkan-1.lib"
+          $arm64Dir   = "$VulkanSDK\Lib\ARM64"
+          $arm64Lib   = "$arm64Dir\vulkan-1.lib"
+          $llvmBin    = "C:\Program Files\LLVM\bin"
+          $defFile    = "$env:RUNNER_TEMP\vulkan-1.def"
+
+          # Check if ARM64 lib already exists (future SDK versions may include it)
           if (Test-Path $arm64Lib) {
-            Write-Host "Found ARM64 Vulkan lib at: $arm64Lib"
+            Write-Host "ARM64 vulkan-1.lib already exists at $arm64Lib"
             Add-Content $env:GITHUB_ENV "NODE_LLAMA_CPP_CMAKE_OPTION_Vulkan_LIBRARY=$arm64Lib"
-          } else {
-            # Fallback: list what's in the SDK Lib dir for diagnostics
-            Write-Host "ARM64 Vulkan lib NOT found. Listing SDK Lib dir:"
-            Get-ChildItem "C:\VulkanSDK\${env:VULKAN_VERSION}\Lib" -Recurse -Filter "vulkan-1.lib" | Select-Object FullName
-            # Try Windows SDK location as fallback
-            $winsdk = (Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\Lib" | Sort-Object Name -Descending | Select-Object -First 1).FullName
-            $winsdkLib = "$winsdk\um\arm64\vulkan-1.lib"
-            if (Test-Path $winsdkLib) {
-              Write-Host "Found ARM64 Vulkan lib in Windows SDK: $winsdkLib"
-              Add-Content $env:GITHUB_ENV "NODE_LLAMA_CPP_CMAKE_OPTION_Vulkan_LIBRARY=$winsdkLib"
-            } else {
-              Write-Host "No ARM64 Vulkan lib found anywhere - build will likely fail"
-            }
+            exit 0
           }
+
+          Write-Host "Generating ARM64 vulkan-1.lib from x64 lib using llvm-dlltool..."
+
+          # Step 1: Extract symbol names from x64 vulkan-1.lib using llvm-nm
+          $nmExe = "$llvmBin\llvm-nm.exe"
+          if (-not (Test-Path $nmExe)) { $nmExe = "llvm-nm.exe" }
+          Write-Host "Using llvm-nm: $nmExe"
+
+          $symbols = & $nmExe --defined-only --extern-only --print-file-name "$x64Lib" 2>&1 |
+            Where-Object { $_ -match " T " -or $_ -match " D " } |
+            ForEach-Object { ($_ -split "\s+")[-1] }
+
+          if ($symbols.Count -eq 0) {
+            Write-Error "Failed to extract symbols from $x64Lib"
+            exit 1
+          }
+          Write-Host "Extracted $($symbols.Count) symbols"
+
+          # Step 2: Write .def file
+          "LIBRARY vulkan-1" | Out-File -FilePath $defFile -Encoding ascii
+          "EXPORTS" | Out-File -FilePath $defFile -Append -Encoding ascii
+          $symbols | ForEach-Object { "    $_" } | Out-File -FilePath $defFile -Append -Encoding ascii
+          Write-Host "DEF file written to $defFile"
+
+          # Step 3: Generate ARM64 import lib using llvm-dlltool
+          $dlltoolExe = "$llvmBin\llvm-dlltool.exe"
+          if (-not (Test-Path $dlltoolExe)) { $dlltoolExe = "llvm-dlltool.exe" }
+          Write-Host "Using llvm-dlltool: $dlltoolExe"
+
+          New-Item -ItemType Directory -Force -Path $arm64Dir | Out-Null
+          & $dlltoolExe -m arm64 -D "vulkan-1.dll" -d $defFile -l $arm64Lib
+          if (-not (Test-Path $arm64Lib)) {
+            Write-Error "Failed to generate ARM64 vulkan-1.lib"
+            exit 1
+          }
+          Write-Host "Successfully generated ARM64 vulkan-1.lib at $arm64Lib"
+          Get-Item $arm64Lib | Select-Object FullName, Length
+
+          # Export to cmake
+          Add-Content $env:GITHUB_ENV "NODE_LLAMA_CPP_CMAKE_OPTION_Vulkan_LIBRARY=$arm64Lib"
 
       - name: Build win-arm64-vulkan binaries
         shell: bash
         env:
           CI: true
         run: |
-          mkdir -p bins
-
           node ./dist/cli/cli.js source build \
             --ciMode \
             --noUsageExample \
@@ -84,13 +116,18 @@ jobs:
             --gpu vulkan \
             --nodeTarget 20
 
-          # Move output to bins/
+      - name: Collect output binaries
+        shell: bash
+        run: |
+          mkdir -p bins
           LOCAL_BUILDS="llama/localBuilds"
           for folder in "$LOCAL_BUILDS"/*/; do
             name=$(basename "$folder")
-            mv "$folder/Release" "bins/$name" || true
+            if [ -d "$folder/Release" ]; then
+              mv "$folder/Release" "bins/$name"
+              echo "Collected: bins/$name"
+            fi
           done
-
           ls -la bins/
 
       - name: Upload artifact
