@@ -114,8 +114,27 @@ export async function compileLlamaCpp(buildOptions: BuildOptions, compileOptions
                     buildOptions.gpu === "vulkan" &&
                     (useWindowsLlvm || (platform === "win" && buildOptions.arch === "arm64")) &&
                     !cmakeCustomOptions.has("GGML_VULKAN_SHADERS_GEN_TOOLCHAIN")
-                )
-                    cmakeToolchainOptions.set("GGML_VULKAN_SHADERS_GEN_TOOLCHAIN", toolchainFile);
+                ) {
+                    // When cross-compiling for arm64 from an x64 host on Windows,
+                    // GGML_VULKAN_SHADERS_GEN_TOOLCHAIN must point to the HOST (x64) toolchain,
+                    // because vulkan-shaders-gen is a build-time tool that runs on the host.
+                    // Using the arm64 target toolchain here would produce an arm64 binary
+                    // that cannot run on the x64 CI runner, causing a SpawnError.
+                    const isWinCrossCompileArm64 = platform === "win" &&
+                        buildOptions.arch === "arm64" &&
+                        process.platform === "win32" &&
+                        process.arch === "x64";
+                    if (isWinCrossCompileArm64) {
+                        // Use host (x64) toolchain for shaders-gen; if not available, omit the option
+                        // so CMake falls back to the default host compiler.
+                        const hostToolchainFile = await getToolchainFileForArch("x64", useWindowsLlvm);
+                        if (hostToolchainFile != null)
+                            cmakeToolchainOptions.set("GGML_VULKAN_SHADERS_GEN_TOOLCHAIN", hostToolchainFile);
+                        // else: no toolchain set → CMake uses default host x64 compiler ✓
+                    } else {
+                        cmakeToolchainOptions.set("GGML_VULKAN_SHADERS_GEN_TOOLCHAIN", toolchainFile);
+                    }
+                }
 
                 if (buildOptions.gpu === "metal" && process.platform === "darwin" && !cmakeCustomOptions.has("GGML_METAL"))
                     cmakeCustomOptions.set("GGML_METAL", "1");
