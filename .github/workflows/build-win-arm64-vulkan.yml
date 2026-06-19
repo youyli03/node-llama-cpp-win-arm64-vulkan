@@ -12,6 +12,13 @@ jobs:
     runs-on: windows-2022
 
     steps:
+      - name: Enable Windows Long Paths
+        shell: powershell
+        run: |
+          reg add "HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\FileSystem" /v LongPathsEnabled /t REG_DWORD /d 1 /f
+          git config --system core.longpaths true
+          Write-Host "Long path support enabled"
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
